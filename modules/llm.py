@@ -1,8 +1,67 @@
-# llm.py - Module de modèle de langage
 import json
 import datetime
 import random
 import re
+from modules.memory import all_facts, add_fact
+
+def get_habits_from_memory():
+    """Retourne un dict {intent: count} calculé depuis la mémoire (pour démo, à remplacer par vrai calcul)"""
+    # Ici tu pourrais extraire les habitudes depuis un fichier, une base ou un module dédié
+    # Pour la démo, on simule :
+    habits = {}  # {"greeting": 5, "time_date": 3, ...}
+    try:
+        with open("data/cognitive_memory.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            habits = data.get("habits", {})
+    except Exception:
+        pass
+    return habits
+
+def get_facts_for_prompt(max_facts=5):
+    """Récupère les faits enregistrés pour enrichir le prompt LLM"""
+    facts = all_facts()
+    if not facts:
+        return ""
+    # On limite le nombre de faits pour ne pas surcharger le prompt
+    selected = list(facts.items())[-max_facts:]
+    return "\n".join(f"- {k}: {v}" for k, v in selected)
+
+def query_llm(prompt, max_tokens=150):
+    """
+    Simule un appel à un LLM. À remplacer par l'appel réel à votre LLM (Ollama, API, etc.)
+    Injecte automatiquement les faits mémorisés et habitudes dans le prompt.
+    """
+    # -- Exemples de commandes "intelligentes" mémoire --
+    prompt_lower = prompt.lower()
+    if prompt_lower.startswith("souviens-toi que"):
+        fait = prompt[15:].strip().rstrip(".")
+        add_fact(fait, fait)
+        return "Je m'en souviendrai."
+    if prompt_lower.startswith("qu'as-tu appris"):
+        mem = all_facts()
+        if mem:
+            return "Voici ce que j'ai retenu :\n" + "\n".join(f"- {v}" for v in mem.values())
+        else:
+            return "Je n'ai encore rien appris de particulier."
+    
+    # -- Injection mémoire cognitive (faits & habitudes) dans le prompt --
+    facts_str = get_facts_for_prompt()
+    habits = get_habits_from_memory()
+    habits_str = ""
+    if habits:
+        # On prend l'habitude la plus fréquente
+        sorted_habits = sorted(habits.items(), key=lambda x: x[1], reverse=True)
+        intent, count = sorted_habits[0]
+        if count >= 3:
+            habits_str = (f"\nL'utilisateur pose souvent des questions de type '{intent}' "
+                          f"(fréquence : {count}). Adapte ta réponse en conséquence.")
+    
+    if facts_str or habits_str:
+        prompt = (f"Connaissances à retenir pour la conversation :\n{facts_str}{habits_str}\n\n{prompt}")
+
+    # -- Simulation LLM classique --
+    # (À remplacer par votre vrai modèle)
+    return f"[LLM] Réponse générée pour : {prompt[:max_tokens]}"
 
 class LanguageModel:
     def __init__(self):
@@ -112,13 +171,13 @@ class LanguageModel:
         return "Je ne peux pas effectuer ce calcul. Pouvez-vous reformuler ?"
     
     def generate_response(self, user_input):
-        """Génère une réponse basée sur l'entrée utilisateur"""
+        """Génère une réponse basée sur l'entrée utilisateur, en tenant compte des faits et habitudes"""
         if not user_input or not user_input.strip():
             return "Je n'ai pas bien compris. Pouvez-vous répéter ?"
         
         user_input = user_input.strip()
         user_lower = user_input.lower()
-        
+
         # Vérification des réponses pré-définies
         for key, response in self.predefined_responses.items():
             if key in user_lower:
@@ -170,19 +229,26 @@ Que souhaitez-vous faire ?"""
             response = random.choice(responses)
         
         else:
-            # Réponse générale intelligente
+            # Réponse générale intelligente, avec prise en compte des faits/habitudes
+            facts_str = get_facts_for_prompt()
+            habits = get_habits_from_memory()
+            habits_info = ""
+            if habits:
+                sorted_habits = sorted(habits.items(), key=lambda x: x[1], reverse=True)
+                intent_h, count = sorted_habits[0]
+                if count >= 3:
+                    habits_info = f"(Tu poses souvent des questions de type '{intent_h}') "
             responses = [
-                f"C'est intéressant ce que vous dites sur '{user_input}'. Pouvez-vous m'en dire plus ?",
-                f"Je comprends que vous parliez de '{user_input}'. Comment puis-je vous aider avec cela ?",
-                f"Merci de partager cela. En quoi puis-je vous assister concernant '{user_input}' ?",
-                "C'est une question intéressante. Pouvez-vous me donner plus de contexte ?",
-                "Je vois. Comment puis-je vous aider davantage avec cette question ?"
+                f"{habits_info}C'est intéressant ce que vous dites sur '{user_input}'. Pouvez-vous m'en dire plus ?",
+                f"{habits_info}Je comprends que vous parliez de '{user_input}'. Comment puis-je vous aider avec cela ?",
+                f"{habits_info}Merci de partager cela. En quoi puis-je vous assister concernant '{user_input}' ?",
+                f"{habits_info}C'est une question intéressante. Pouvez-vous me donner plus de contexte ?",
+                f"{habits_info}Je vois. Comment puis-je vous aider davantage avec cette question ?"
             ]
+            # Ajoute au contexte pour l'apprentissage
             response = random.choice(responses)
         
-        # Ajouter à l'historique
         self.add_to_context(user_input, response)
-        
         return response
     
     def get_stats(self):
