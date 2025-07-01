@@ -1,10 +1,16 @@
 {
   "facts": {},
   "habits": {
-    "salutation": 1
+    "salutation": 5,
+    "autre": 3
   },
   "feedback": [],
   "repetitions": {
-    "bonjour william": 1
+    "bonjour william": 3,
+    "bonjour william as tu des conseils concernant ton optimisation ?": 1,
+    "qui suis je pour toi ?": 1,
+    "bonjour": 1,
+    "bit bit bit": 1,
+    "1 une ? non ! 2吃 . on a k'autron de la mukike ! pourquoi ? arrêtez le temps ici ! si vous quirolisez mes deux chords, vous pas nårez?": 1
   }
 }

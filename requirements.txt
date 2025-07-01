@@ -1,22 +1,30 @@
-# WillIAM Assistant Dependencies
+# Synthèse vocale
+TTS
+pyttsx3
 
-# Core packages
-requests>=2.28.0
-beautifulsoup4>=4.11.0
-speechrecognition>=3.10.0
-watchdog>=2.2.0
-pillow>=9.4.0
-scikit-learn>=1.2.0
+# Reconnaissance vocale
+openai-whisper
+SpeechRecognition
 
-# TTS/STT packages
-edge-tts>=6.1.0
-pyttsx3>=2.90
-pyaudio>=0.2.11
+# Microphone & audio
+pyaudio
+sounddevice
+pygame
 
-# Optional packages
-TTS>=0.13.0
-pygame>=2.1.0
+# LLM & IA
+transformers
+torch
 
-# AI/ML packages (optional)
-# torch>=1.13.0
-# transformers>=4.21.0
+# GUI
+PySide6
+
+# Analyse fichiers (OCR, PDF, DOCX, images, vidéo)
+pytesseract
+pillow
+pymupdf
+python-docx
+moviepy
+
+# Fallback audio (bip)
+numpy
+scipy

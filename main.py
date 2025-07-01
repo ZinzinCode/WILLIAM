@@ -1,16 +1,19 @@
+import sys
+import threading
 import datetime
 import os
 import json
-from tts import speak
 
-try:
-    from stt import listen
-except ImportError:
-    listen = None
-
+from gui import WilliamGUI
+from stt import listen
+from tts import speak, preload_tts, ensure_voice_cache  # Ajout ici
 from ollama_api import ollama_chat
 
-# --- Mémoire cognitive persistante ---
+# === Ajout pour le Mode REPAIR ===
+from PySide6.QtWidgets import QPushButton
+from interface.repair_panel import RepairPanel
+
+# --- Mémoire cognitive persistante (optimisée, externalisable) ---
 MEMORY_FILE = "data/william_memory.json"
 
 def load_memory():
@@ -44,7 +47,7 @@ def record_repetition(text):
     save_memory(memory)
     return memory["repetitions"][key]
 
-# --- Détection d'intention/utilité ---
+# --- Détection d'intention/utilité (optimisée) ---
 def is_code_question(user_input):
     mots_code = [
         "code", "python", "fonction", "programme", "script",
@@ -73,7 +76,7 @@ def detect_intent(text):
         return "ocr"
     return "autre"
 
-# --- Web search & OCR integration ---
+# --- Web search & OCR integration (sécurisé) ---
 def web_search(query):
     try:
         from websearch import bing_search
@@ -89,28 +92,8 @@ def run_ocr():
     except Exception as e:
         return f"Erreur OCR : {e}"
 
-# --- Log/statistique proactive ---
-LOG_FILE = "william_diagnostics/logs/errors.log"
-def analyze_error_log(max_lines=200):
-    if not os.path.exists(LOG_FILE):
-        return {"count": 0, "recent_errors": [], "suggest_clear": False}
-    with open(LOG_FILE, "r", encoding="utf-8") as f:
-        lines = f.readlines()[-max_lines:]
-    error_count = sum(1 for l in lines if "ERROR:" in l or "Erreur" in l)
-    recent_errors = [l.strip() for l in lines if "ERROR:" in l or "Erreur" in l][-5:]
-    suggest_clear = os.path.getsize(LOG_FILE) > 1_000_000
-    return {"count": error_count, "recent_errors": recent_errors, "suggest_clear": suggest_clear}
-
-def prompt_diagnostic_if_needed():
-    stats = analyze_error_log()
-    if stats["count"] > 10:
-        speak("🚨 J'ai rencontré de nombreuses erreurs récentes. Voulez-vous lancer un diagnostic ou nettoyer les logs ('clear logs') ?")
-    if stats["suggest_clear"]:
-        speak("⚠️ Les logs d’erreurs sont volumineux. Dites 'clear logs' pour les nettoyer.")
-
-# --- Génération de réponse principale ---
+# --- Génération de réponse principale (modulaire, ready LLM) ---
 def get_response(user_input, history):
-    # Ajoute un prompt système si première question à Llama 3
     llama_history = history[:]
     if not any(m.get("role") == "system" for m in llama_history):
         llama_history = [
@@ -141,7 +124,6 @@ def get_response(user_input, history):
             add_fact(f"OCR du {datetime.datetime.now().isoformat()}", ocr_text)
             return f"Texte OCR extrait :\n{ocr_text[:500]}" + ("..." if len(ocr_text) > 500 else "")
 
-    # Génération code ou général
     if is_code_question(user_input):
         code_response = ollama_chat(
             user_input + " (Réponds seulement avec le code ou la correction, sans explication superflue, maximum 10 lignes.)",
@@ -175,65 +157,67 @@ def get_response(user_input, history):
 
 # ---- MAIN PROGRAMME ----
 
-print("🤖 Initialisation de William...")
-print(f"📅 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+def main_gui():
+    from PySide6.QtWidgets import QApplication
 
-try:
-    from diagnostic import run_diagnostic
-    erreurs = run_diagnostic()
-    modules_critiques = [m for m, info in erreurs.items() if info["status"] == "ERROR" and m in ["wcm", "tts"]]
-    if modules_critiques:
-        print("\n❌ Impossible de démarrer William : modules critiques manquants.")
-        exit(1)
-except Exception as e:
-    print(f"⚠️ Erreur pendant le diagnostic : {e}")
-    print("⛔ Démarrage annulé pour éviter des comportements instables.")
-    exit(1)
+    # Préchargement TTS pour réactivité (XTTS, pyttsx3, etc)
+    try:
+        preload_tts()
+        ensure_voice_cache()  # <--- Ajout ici : génère les samples voix manquants
+    except Exception:
+        pass
 
-print("\n🤖 William est prêt ! Tapez 'quit' pour quitter.")
+    app = QApplication(sys.argv)
+    gui = WilliamGUI()
+    gui.show()
+    gui.append_text("Bienvenue dans WILLIAM, assistant IA vocal évolutif !", "#b200ff")
+    gui.set_diagnostic("⏳")
 
-history = []
-log_check_counter = 0
+    history = []
 
-while True:
-    mode = input("Mode [t]exte ou [v]ocal ? (t/v): ").strip().lower()
-    if mode == "v" and listen:
-        user_input = listen()
-    else:
-        user_input = input("👤 Vous: ").strip()
-    if not user_input:
-        continue
+    def on_toggle_listen(active):
+        if active:
+            gui.append_text("<i>Écoute vocale activée...</i>", "#ffd700")
+            def listen_and_respond():
+                user_input = listen(gui_callback=gui.show_live_transcription)
+                if not user_input:
+                    gui.append_text("<i>Aucune entrée vocale détectée.</i>", "#ff5555")
+                    return
+                gui.append_text(f"<b>Vous :</b> {user_input}", "#36e636")
+                response = get_response(user_input, history)
+                gui.append_text(f"<b>William :</b> {response}", "#fff")
+                speak(response)
+                history.append({"role": "user", "content": user_input})
+                history.append({"role": "assistant", "content": response})
+            threading.Thread(target=listen_and_respond, daemon=True).start()
+        else:
+            gui.append_text("<i>Écoute désactivée.</i>", "#ffd700")
 
-    if user_input.lower() in ["quit", "exit"]:
-        print("👋 Au revoir !")
-        break
+    gui.toggle_listen.connect(on_toggle_listen)
 
-    if user_input.lower() == "diagnostic":
-        try:
-            run_diagnostic()
-        except Exception:
-            print("Diagnostic indisponible.")
-        continue
+    # Diagnostic affiché dans la GUI (optionnel, si tu as un module diagnostic)
+    try:
+        from diagnostic import run_diagnostic
+        erreurs = run_diagnostic()
+        if not erreurs or all(info["status"] == "OK" for info in erreurs.values()):
+            gui.set_diagnostic("✅")
+        else:
+            gui.set_diagnostic("❌")
+    except Exception:
+        gui.set_diagnostic("❌")
 
-    if user_input.lower() == "clear logs":
-        try:
-            if os.path.exists(LOG_FILE):
-                os.remove(LOG_FILE)
-                print("🧹 Les logs ont été nettoyés.")
-            else:
-                print("Aucun log à nettoyer.")
-        except Exception as e:
-            print(f"Impossible de nettoyer les logs : {e}")
-        continue
+    # === Ajout du bouton Mode REPAIR ===
+    repair_btn = QPushButton("Mode REPAIR")
+    gui.layout.addWidget(repair_btn)  # <-- SANS les parenthèses
+    def open_repair():
+        panel = RepairPanel()
+        panel.show()
+    repair_btn.clicked.connect(open_repair)
 
-    response = get_response(user_input, history)
-    print(f"🤖 William: {response}")
-    speak(response)
+    sys.exit(app.exec())
 
-    history.append({"role": "user", "content": user_input})
-    history.append({"role": "assistant", "content": response})
-
-    # Vérification proactive des logs/statistiques toutes les 10 interactions
-    log_check_counter += 1
-    if log_check_counter % 10 == 0:
-        prompt_diagnostic_if_needed()
+if __name__ == "__main__":
+    # Auto-création dossiers critiques
+    os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
+    os.makedirs("data/tts_cache", exist_ok=True)
+    main_gui()
